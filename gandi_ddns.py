@@ -1,88 +1,84 @@
-import configparser as configparser
+"""
+Python Dynamic DNS script for Gandi LiveDNS
+"""
+
+import configparser
 import ipaddress
 import json
+import logging
 import os
 import sys
-from datetime import datetime
 
 import requests
+from systemd.journal import JournalHandler
 
-config_file = "config.txt"
-
+LOGGER = logging.getLogger("gandi_ddns")
+CONFIG_FILE = "config.txt"
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+JOURNAL_HANDLER = JournalHandler()
+
+# Could be any service that just gives us a simple raw ASCII IP address (not HTML etc)
+EXTERNAL_IP_URL = "https://api.ipify.org"
 
 
 def get_ip():
-    # Get external IP
+    """
+    Retuns the external ip address of the machine.
+    """
     try:
-        # Could be any service that just gives us a simple raw ASCII IP address (not HTML etc)
-        r = requests.get("https://api.ipify.org", timeout=3)
+        resp = requests.get(EXTERNAL_IP_URL, timeout=3)
     except Exception:
-        print("Failed to retrieve external IP.")
+        LOGGER.critical("Failed to retrieve external IP.", exc_info=True)
         sys.exit(2)
-    if r.status_code != 200:
-        print(
-            (
-                "Failed to retrieve external IP. Server responded with status_code: %d"
-                % r.status_code
-            )
+    if resp.status_code != 200:
+        LOGGER.critical(
+            "Failed to retrieve external IP. Invalid status code in response.",
+            extra={"STATUS_CODE": resp.status_code},
+            exc_info=True,
         )
         sys.exit(2)
 
-    ip = r.text.rstrip()  # strip \n and any trailing whitespace
-
-    if not (ipaddress.IPv4Address(ip)):  # check if valid IPv4 address
+    ip_addr = resp.text.rstrip()  # strip \n and any trailing whitespace
+    if not ipaddress.IPv4Address(ip_addr):  # check if valid IPv4 address
         sys.exit(2)
 
-    return ip
-
-
-def read_config(config_path):
-    # Read configuration file
-    cfg = configparser.ConfigParser()
-    cfg.read(config_path)
-
-    return cfg
-
-
-def get_record(url, headers):
-    # Get existing record
-    r = requests.get(url, headers=headers)
-
-    return r
+    return ip_addr
 
 
 def update_record(url, headers, payload):
-    # Add record
-    r = requests.put(url, headers=headers, json=payload)
-    if r.status_code != 201:
-        print(("Record update failed with status code: %d" % r.status_code))
-        print((r.text))
+    """
+    Updates a record
+    """
+    resp = requests.put(url, headers=headers, json=payload)
+    if resp.status_code != 201:
+        LOGGER.critical(
+            "Record update failed",
+            extra={"STATUS_CODE": resp.status_code, "RESPONSE_TEXT": resp.text},
+        )
         sys.exit(2)
-    print("Zone record updated.")
-
-    return r
+    LOGGER.info("DNS record updated.")
+    return resp
 
 
 def main():
-    path = config_file
+    """
+    Main entry point.
+    """
+    path = CONFIG_FILE
     if not path.startswith("/"):
         path = os.path.join(SCRIPT_DIR, path)
-    config = read_config(path)
+
+    config = configparser.ConfigParser()
+    config.read(path)
+
     if not config:
         sys.exit("Please fill in the 'config.txt' file.")
 
     for section in config.sections():
-        print("%s - section %s" % (str(datetime.now()), section))
+        # LOGGER.info("%s - section %s" % (str(datetime.now()), section))
 
-        # Retrieve API key
         apikey = config.get(section, "apikey")
-
-        # Set headers
-        headers = {
-            "Content-Type": "application/json",
-            "X-Api-Key": "%s" % config.get(section, "apikey"),
-        }
+        headers = {"Content-Type": "application/json", "X-Api-Key": apikey}
 
         # Set URL
         url = "%sdomains/%s/records/%s/A" % (
@@ -90,33 +86,28 @@ def main():
             config.get(section, "domain"),
             config.get(section, "a_name"),
         )
-        print(url)
+        LOGGER.debug("API Endpoint", extra={"URL": url})
+
         # Discover External IP
         external_ip = get_ip()
-        print(("External IP is: %s" % external_ip))
+        LOGGER.debug("Got external IP", extra={"EXTERNAL_IP": external_ip})
 
-        # Prepare record
+        # Check current record
+        record = requests.get(url, headers=headers)
+
+        if record.status_code == 200:
+            dns_value = json.loads(record.text)["rrset_values"][0]
+            LOGGER.info("Current DNS record", extra={"RECORD_VALUE": dns_value})
+            if dns_value == external_ip:
+                LOGGER.info("No change in IP address.")
+                continue
+        else:
+            LOGGER.warning("No existing record.")
+
         payload = {
             "rrset_ttl": config.get(section, "ttl"),
             "rrset_values": [external_ip],
         }
-
-        # Check current record
-        record = get_record(url, headers)
-
-        if record.status_code == 200:
-            print(
-                (
-                    "Current record value is: %s"
-                    % json.loads(record.text)["rrset_values"][0]
-                )
-            )
-            if json.loads(record.text)["rrset_values"][0] == external_ip:
-                print("No change in IP address. Goodbye.")
-                continue
-        else:
-            print("No existing record. Adding...")
-
         update_record(url, headers, payload)
 
 
