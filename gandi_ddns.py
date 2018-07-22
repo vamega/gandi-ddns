@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """
 Python Dynamic DNS script for Gandi LiveDNS
 """
