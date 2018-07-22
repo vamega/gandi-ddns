@@ -17,6 +17,9 @@ LOGGER = logging.getLogger("gandi_ddns")
 CONFIG_FILE = "config.txt"
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 JOURNAL_HANDLER = JournalHandler()
+JOURNAL_HANDLER.setFormatter(logging.Formatter("%(message)s"))
+LOGGER.addHandler(JOURNAL_HANDLER)
+LOGGER.setLevel(logging.DEBUG)
 
 # Could be any service that just gives us a simple raw ASCII IP address (not HTML etc)
 EXTERNAL_IP_URL = "https://api.ipify.org"
