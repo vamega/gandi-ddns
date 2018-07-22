@@ -1,10 +1,11 @@
 import configparser as configparser
-import sys
-import os
-import requests
-import json
 import ipaddress
+import json
+import os
+import sys
 from datetime import datetime
+
+import requests
 
 config_file = "config.txt"
 
