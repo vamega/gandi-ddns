@@ -1,0 +1,25 @@
+defaults:
+  api: https://dns.api.gandi.net/api/v5/
+  apikey: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+  ttl: 900
+
+domains:
+  local:
+    ## These are required
+    # domain
+    domain: example.com
+
+    # A-record name (@, dev, home, etc) that will be updated
+    # example is for raspbian.example.com
+    a_name: raspbian 
+
+    ## These are only required if they differ from what is listed in the
+    ## `defaults` section.
+    # Production API
+    api: https://dns.api.gandi.net/api/v5/
+
+    # gandi.net API (Production) key, if different from the default
+    apikey: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+    # TTL (seconds)
+    ttl: 900

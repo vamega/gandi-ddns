@@ -3,7 +3,6 @@
 Python Dynamic DNS script for Gandi LiveDNS
 """
 
-import configparser
 import ipaddress
 import json
 import logging
@@ -11,10 +10,11 @@ import os
 import sys
 
 import requests
+import yaml
 from systemd.journal import JournalHandler
 
 LOGGER = logging.getLogger("gandi_ddns")
-CONFIG_FILE = "config.txt"
+CONFIG_FILE = "config.yaml"
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 JOURNAL_HANDLER = JournalHandler()
 JOURNAL_HANDLER.setFormatter(logging.Formatter("%(message)s"))
@@ -44,6 +44,12 @@ def get_ip():
 
     ip_addr = resp.text.rstrip()  # strip \n and any trailing whitespace
     if not ipaddress.IPv4Address(ip_addr):  # check if valid IPv4 address
+        LOGGER.critical(
+            "IP Address service response could not be identified as an IP address.",
+            extra={"STATUS_CODE": resp.status_code, "RESPONSE": resp.text},
+            exc_info=True,
+        )
+        # TODO: Raise error instead of exiting here.
         sys.exit(2)
 
     return ip_addr
@@ -72,23 +78,35 @@ def main():
     if not path.startswith("/"):
         path = os.path.join(SCRIPT_DIR, path)
 
-    config = configparser.ConfigParser()
-    config.read(path)
+    with open(path, "r") as config_file:
+        config = yaml.safe_load(config_file)
 
     if not config:
         sys.exit("Please fill in the 'config.txt' file.")
 
-    for section in config.sections():
+    config_defaults = config["defaults"]
+    defaults = {
+        "api": config_defaults["api"],
+        "apikey": config_defaults["apikey"],
+        "ttl": config_defaults["ttl"],
+    }
+
+    for domain_key, domain_config in config["domains"].items():
         # LOGGER.info("%s - section %s" % (str(datetime.now()), section))
 
-        apikey = config.get(section, "apikey")
-        headers = {"Content-Type": "application/json", "X-Api-Key": apikey}
+        overlaid_config = defaults.copy()
+        overlaid_config.update(domain_config)
+
+        headers = {
+            "Content-Type": "application/json",
+            "X-Api-Key": overlaid_config["apikey"],
+        }
 
         # Set URL
         url = "%sdomains/%s/records/%s/A" % (
-            config.get(section, "api"),
-            config.get(section, "domain"),
-            config.get(section, "a_name"),
+            overlaid_config["api"],
+            overlaid_config["domain"],
+            overlaid_config["a_name"],
         )
         LOGGER.debug("API Endpoint", extra={"URL": url})
 
@@ -108,10 +126,7 @@ def main():
         else:
             LOGGER.warning("No existing record.")
 
-        payload = {
-            "rrset_ttl": config.get(section, "ttl"),
-            "rrset_values": [external_ip],
-        }
+        payload = {"rrset_ttl": overlaid_config["ttl"], "rrset_values": [external_ip]}
         update_record(url, headers, payload)
 
 
