@@ -11,15 +11,13 @@ import sys
 
 import requests
 import yaml
+import structlog
 from systemd.journal import JournalHandler
 
 LOGGER = logging.getLogger("gandi_ddns")
 CONFIG_FILE = "config.yaml"
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
-JOURNAL_HANDLER = JournalHandler()
-JOURNAL_HANDLER.setFormatter(logging.Formatter("%(message)s"))
-LOGGER.addHandler(JOURNAL_HANDLER)
-LOGGER.setLevel(logging.DEBUG)
+
 
 # Could be any service that just gives us a simple raw ASCII IP address (not HTML etc)
 EXTERNAL_IP_URL = "https://api.ipify.org"
@@ -68,6 +66,78 @@ def update_record(url, headers, payload):
         sys.exit(2)
     LOGGER.info("DNS record updated.")
     return resp
+
+
+def configure_logging():
+    """
+    """
+    # JOURNAL_HANDLER = JournalHandler()
+    # JOURNAL_HANDLER.setFormatter(logging.Formatter("%(message)s"))
+    # LOGGER.addHandler(JOURNAL_HANDLER)
+    # LOGGER.setLevel(logging.DEBUG)
+
+    timestamper = structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S")
+    pre_chain = [
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.processors.UnicodeDecoder(),
+        structlog.stdlib.render_to_log_kwargs,
+        timestamper,
+    ]
+
+    logging.config.dictConfig({
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "plain": {
+                    "()": structlog.stdlib.ProcessorFormatter,
+                    "processor": structlog.dev.ConsoleRenderer(colors=False),
+                    "foreign_pre_chain": pre_chain,
+                },
+                "colored": {
+                    "()": structlog.stdlib.ProcessorFormatter,
+                    "processor": structlog.dev.ConsoleRenderer(colors=True),
+                    "foreign_pre_chain": pre_chain,
+                },
+            },
+            "handlers": {
+                "default": {
+                    "level": "DEBUG",
+                    "class": "logging.StreamHandler",
+                    "formatter": "colored",
+                },
+                "file": {
+                    "level": "DEBUG",
+                    "class": "logging.handlers.WatchedFileHandler",
+                    "filename": "test.log",
+                    "formatter": "plain",
+                },
+            },
+            "loggers": {
+                "": {
+                    "handlers": ["default", "file"],
+                    "level": "DEBUG",
+                    "propagate": True,
+                },
+            }
+    })
+
+    structlog.configure(
+        processors=shared_processors + [
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+        ],
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+    formatter = structlog.stdlib.ProcessorFormatter(
+        processor=structlog.dev.ConsoleRenderer(),
+        foreign_pre_chain=shared_processors,
+    )
 
 
 def main():
